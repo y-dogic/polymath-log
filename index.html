@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <title>Polymath Log</title>
 <style>
   :root{
@@ -117,6 +120,7 @@
 <body>
 <div class="app" id="app"></div>
 <script>
+const APP_VERSION = 'v7 · 2026-09-01';
 const KEY = 'ship-log-v1';
 const DAY = 86400000;
 
@@ -394,16 +398,50 @@ async function gistRequest(method, path, body){
     body: body ? JSON.stringify(body) : undefined
   });
   if(!res.ok){
+    if(res.status === 401) throw new Error('Token not accepted — it is mistyped, expired, or was revoked.');
+    if(res.status === 403) throw new Error('Token lacks the gist permission (or GitHub is rate-limiting you).');
+    if(res.status === 404) throw new Error('Gist not found — the ID is wrong, or this token belongs to a different GitHub account.');
     const t = await res.text();
-    throw new Error(res.status + ' ' + t.slice(0,120));
+    throw new Error(res.status + ' ' + t.slice(0,100));
   }
   return res.json();
 }
 async function saveSyncConfig(token, gist){
-  setSync({ token:(token||'').trim(), gist:(gist||'').trim() });
+  const tok = (token||'').replace(/\s+/g,'');
+  let gid = (gist||'').trim();
+  const m = gid.match(/([0-9a-f]{20,})/i);   // accept a full gist URL too
+  if(m) gid = m[1];
+  setSync({ token: tok, gist: gid });
   ui.syncMsg = 'Saved on this device.';
   render();
 }
+async function testConnection(){
+  const cfg = getSync();
+  if(!cfg.token){ ui.syncMsg = '✕ No token entered on this device.'; render(); return; }
+  ui.syncing = true; ui.syncMsg = 'Testing…'; render();
+  try{
+    const me = await gistRequest('GET', '/user');
+    let msg = '✓ Token works — signed in as ' + (me.login || 'unknown') + '.';
+    if(!cfg.gist){
+      msg += ' No gist ID yet — press "Back up now" to create one.';
+    } else {
+      const g = await gistRequest('GET', '/gists/' + cfg.gist);
+      const f = g.files && g.files['ship-log.json'];
+      if(!f){
+        msg += ' ✕ That gist exists but has no ship-log.json in it.';
+      } else {
+        let n = '?';
+        try{ const d = JSON.parse(f.content); n = (d.log||[]).length; }catch(e){}
+        msg += ' ✓ Gist found, ' + n + ' log entries in the cloud. Press "Get my data on this device" to load it.';
+      }
+    }
+    ui.syncMsg = msg;
+  }catch(e){
+    ui.syncMsg = '✕ ' + e.message;
+  }
+  ui.syncing = false; render();
+}
+
 async function pushToCloud(){
   const cfg = getSync();
   if(!cfg.token){ ui.syncMsg='Add your token first.'; render(); return; }
@@ -647,11 +685,12 @@ function syncHTML(){
   const linked = cfg.token && cfg.gist;
   return `<details><summary>Cloud sync — ${linked ? 'linked' : 'not set up'}</summary>
     <p class="field-label">GitHub token (stays on this device only)</p>
-    <input type="text" id="sync-token" value="${esc(cfg.token)}" placeholder="ghp_..." autocomplete="off" />
+    <input type="text" id="sync-token" value="${esc(cfg.token)}" placeholder="ghp_..." autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
     <p class="field-label" style="margin-top:10px;">Gist ID (leave blank the first time)</p>
-    <input type="text" id="sync-gist" value="${esc(cfg.gist)}" placeholder="created automatically on first push" />
+    <input type="text" id="sync-gist" value="${esc(cfg.gist)}" placeholder="created automatically the first time you back up" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" />
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
       <button class="btn sm" data-a="save-sync">Save settings</button>
+      <button class="btn sm" data-a="test" ${ui.syncing?'disabled':''}>Test connection</button>
       <button class="btn primary sm" data-a="push" ${ui.syncing?'disabled':''}>Back up now</button>
       <button class="btn sm" data-a="pull" ${ui.syncing?'disabled':''}>Get my data on this device</button>
       <button class="btn ghost sm" data-a="dl">Save a file copy</button>
@@ -701,6 +740,7 @@ function render(){
     ${logHTML()}
     ${syncHTML()}
     ${backupHTML()}
+    <div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:14px;letter-spacing:0.08em;">${esc(APP_VERSION)}</div>
   `;
   wire();
 }
@@ -741,6 +781,11 @@ function wire(){
       else if(a==='save-sync'){
         const t=document.getElementById('sync-token'), g=document.getElementById('sync-gist');
         await saveSyncConfig(t?t.value:'', g?g.value:'');
+      }
+      else if(a==='test'){
+        const t=document.getElementById('sync-token'), g=document.getElementById('sync-gist');
+        await saveSyncConfig(t?t.value:'', g?g.value:'');
+        await testConnection();
       }
       else if(a==='push') await pushToCloud();
       else if(a==='pull') await pullFromCloud();
