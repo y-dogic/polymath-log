@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ship Log</title>
+<style>
+  :root{
+    --bg: #12201d;
+    --panel: #182a26;
+    --line: #24413a;
+    --text: #eae7de;
+    --muted: #8fa39c;
+    --cyan: #5fc9bd;
+    --cyan-dim: #3a635c;
+    --amber: #e5a445;
+    --danger: #d97757;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; padding:0; background: transparent; color: var(--text); font-family: var(--sans); }
+  .app{ max-width: 560px; margin: 0 auto; padding: 22px 16px 60px; }
+
+  .topbar{ display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .topbar h1{ font-size:17px; margin:0; font-weight:650; letter-spacing:0.01em; }
+  .ratio{ font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .ratio b{ color:var(--amber); font-weight:600; }
+
+  .pills{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+  .pill{
+    font-size:12px; font-family:var(--sans); padding:5px 10px; border-radius:99px;
+    border:1px solid var(--line); background:transparent; color:var(--muted); cursor:pointer;
+  }
+  .pill.active{ border-color:var(--cyan-dim); background:rgba(95,201,189,0.12); color:var(--cyan); }
+  .pill.add{ color:var(--muted); border-style:dashed; }
+
+  .now{
+    background: var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:20px 18px; margin-bottom:14px;
+  }
+  .now .eyebrow{
+    font-family:var(--mono); font-size:10px; letter-spacing:0.16em; text-transform:uppercase;
+    color:var(--cyan); margin-bottom:12px;
+  }
+  .now .step{ font-size:18px; line-height:1.45; font-weight:500; margin-bottom:4px; }
+  .now .meta{ font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:16px; }
+  .now .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+
+  .btn{
+    font-family:var(--sans); font-size:13px; font-weight:600; border-radius:7px;
+    padding:9px 14px; cursor:pointer; white-space:nowrap; border:1px solid var(--cyan-dim);
+    background:transparent; color:var(--cyan);
+  }
+  .btn:hover{ background:rgba(95,201,189,0.1); }
+  .btn.primary{ background:var(--cyan); color:#0c1614; border-color:var(--cyan); }
+  .btn.primary:hover{ opacity:0.9; }
+  .btn.ghost{ border-color:var(--line); color:var(--muted); }
+  .btn.ghost:hover{ background:rgba(255,255,255,0.04); }
+  .btn.sm{ font-size:12px; padding:6px 10px; }
+
+  input[type=text]{
+    width:100%; background: var(--bg); border:1px solid var(--line); color:var(--text);
+    border-radius:7px; padding:10px 11px; font-size:14px; font-family:var(--sans);
+  }
+  input[type=text]:focus{ outline:none; border-color:var(--cyan-dim); }
+  .field-label{ font-size:12px; color:var(--muted); margin:0 0 6px; }
+
+  .choice{ display:flex; gap:8px; margin-bottom:14px; }
+  .choice button{
+    flex:1; text-align:left; padding:11px 12px; border-radius:8px; cursor:pointer;
+    border:1px solid var(--line); background:var(--bg); color:var(--text); font-family:var(--sans);
+  }
+  .choice button:hover{ border-color:var(--cyan-dim); }
+  .choice .k{ display:block; font-size:13px; font-weight:600; margin-bottom:2px; }
+  .choice .d{ display:block; font-size:11px; color:var(--muted); line-height:1.35; }
+  .choice button.out .k{ color:var(--amber); }
+  .choice button.inp .k{ color:var(--muted); }
+
+  .hint{ font-size:12px; color:var(--muted); line-height:1.5; margin-top:10px; }
+  .warn{ font-size:12px; color:var(--amber); line-height:1.5; margin-top:10px; }
+
+  details{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+  summary{ cursor:pointer; font-family:var(--mono); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); list-style:none; }
+  summary::-webkit-details-marker{ display:none; }
+  summary::before{ content:"▸ "; }
+  details[open] summary::before{ content:"▾ "; }
+  details > *:not(summary){ margin-top:12px; }
+
+  .log-row{ display:flex; gap:8px; align-items:baseline; padding:6px 0; border-bottom:1px dashed var(--line); font-size:13px; }
+  .log-row:last-child{ border-bottom:none; }
+  .log-row .tag{ font-family:var(--mono); font-size:9px; letter-spacing:0.08em; padding:2px 5px; border-radius:3px; flex-shrink:0; }
+  .tag.out{ background:rgba(229,164,69,0.18); color:var(--amber); }
+  .tag.inp{ background:rgba(143,163,156,0.15); color:var(--muted); }
+  .log-row .txt{ flex:1; min-width:0; }
+  .log-row .dt{ font-family:var(--mono); font-size:10px; color:var(--muted); flex-shrink:0; }
+
+  .queue-row{ display:flex; gap:8px; align-items:center; padding:5px 0; font-size:13px; }
+  .queue-row .txt{ flex:1; }
+  .remove{ background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; padding:2px 5px; }
+  .remove:hover{ color:var(--danger); }
+  .row-add{ display:flex; gap:8px; margin-top:10px; }
+  .row-add input{ flex:1; }
+
+  .env-row{ display:flex; gap:9px; align-items:center; padding:6px 0; font-size:13px; }
+  .env-row input[type=checkbox]{ width:15px; height:15px; accent-color:var(--cyan); flex-shrink:0; }
+  .env-row .txt{ flex:1; }
+  .env-row .txt.done{ color:var(--muted); text-decoration:line-through; }
+
+  .empty{ font-size:13px; color:var(--muted); }
+  .bar{ height:6px; border-radius:3px; background:var(--line); overflow:hidden; display:flex; margin:8px 0 4px; }
+  .bar .out{ background:var(--amber); }
+  .bar .inp{ background:var(--cyan-dim); }
+  textarea{ width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:8px; font-family:var(--mono); font-size:10px; min-height:56px; resize:vertical; }
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script>
+const KEY = 'ship-log-v1';
+const DAY = 86400000;
+
+function today(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function addDays(s,n){ const d=new Date(s+'T00:00:00'); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function daysBetween(a,b){ return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/DAY); }
+function uid(){ return Math.random().toString(36).slice(2,9); }
+function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+
+let state = null;
+let ui = { mode:'idle', splitInput:['',''], nextInput:'', pendingKind:null, backupMsg:'', editQ:null, syncMsg:'', syncing:false };
+
+const SYNC_KEY = 'ship-log-sync';
+function getSync(){
+  try{ return JSON.parse(window.localStorage.getItem(SYNC_KEY)) || {token:'',gist:''}; }
+  catch(e){ return {token:'',gist:''}; }
+}
+function setSync(cfg){
+  try{ window.localStorage.setItem(SYNC_KEY, JSON.stringify(cfg)); }catch(e){}
+}
+
+function defaultState(){
+  return {
+    activeProject: null,
+    projects: [
+      { id:'p1', name:'Workload App', queue:[{ id:uid(), text:'Write down the 3 fields the app must track — nothing else' }] },
+      { id:'p2', name:'ComfyUI / AI Video', queue:[{ id:uid(), text:'Open ComfyUI and run one default workflow end to end' }] }
+    ],
+    log: [],
+    env: [
+      { id:uid(), text:'ComfyUI opens with one workflow already loaded', done:false },
+      { id:uid(), text:'App project folder is pinned / one click away', done:false }
+    ],
+    review: { last:null, next: addDays(today(), 7) }
+  };
+}
+
+// Storage adapter: uses Claude's artifact storage when present,
+// otherwise falls back to the browser's own localStorage so this file
+// works as a standalone page with no account and no internet.
+const store = {
+  async get(){
+    if(typeof window.storage !== 'undefined' && window.storage){
+      try{ const r = await window.storage.get(KEY, false); return r && r.value ? r.value : null; }
+      catch(e){ /* fall through to local */ }
+    }
+    try{ return window.localStorage.getItem(KEY); }catch(e){ return null; }
+  },
+  async set(v){
+    if(typeof window.storage !== 'undefined' && window.storage){
+      try{ await window.storage.set(KEY, v, false); return; }
+      catch(e){ /* fall through to local */ }
+    }
+    try{ window.localStorage.setItem(KEY, v); }catch(e){ console.error('no storage available', e); }
+  }
+};
+
+async function load(){
+  // 1. try this device's local copy
+  try{
+    const v = await store.get();
+    if(v) return normalize(JSON.parse(v));
+  }catch(e){}
+
+  // 2. local copy is gone (Safari may have purged it) — recover from the cloud
+  const cfg = getSync();
+  if(cfg.token && cfg.gist){
+    try{
+      const g = await gistRequest('GET', '/gists/'+cfg.gist);
+      const f = g.files && g.files['ship-log.json'];
+      if(f){
+        const parsed = JSON.parse(f.content);
+        if(parsed.projects){
+          const recovered = normalize(parsed);
+          await store.set(JSON.stringify(recovered));
+          syncStatus = 'ok'; lastPushed = new Date();
+          return recovered;
+        }
+      }
+    }catch(e){ console.error('recovery pull failed', e); }
+  }
+
+  // 3. genuinely fresh start
+  const s = defaultState();
+  s.activeProject = s.projects[0].id;
+  await store.set(JSON.stringify(s));
+  return s;
+}
+function normalize(s){
+  s.projects = s.projects || [];
+  s.projects.forEach(p => { p.queue = p.queue || []; });
+  s.log = s.log || [];
+  s.env = s.env || [];
+  s.review = s.review || { last:null, next: addDays(today(),7) };
+  if(!s.activeProject && s.projects.length) s.activeProject = s.projects[0].id;
+  return s;
+}
+let pushTimer = null;
+let syncStatus = 'idle';   // idle | pending | pushing | ok | error
+let lastPushed = null;
+
+async function save(s){
+  await store.set(JSON.stringify(s));
+  scheduleAutoPush();
+}
+
+function scheduleAutoPush(){
+  const cfg = getSync();
+  if(!cfg.token) return;              // not set up — nothing to do
+  syncStatus = 'pending';
+  if(pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { autoPush(); }, 2500);
+  paintStatus();
+}
+
+async function autoPush(){
+  const cfg = getSync();
+  if(!cfg.token) return;
+  syncStatus = 'pushing'; paintStatus();
+  try{
+    const files = { 'ship-log.json': { content: JSON.stringify(state, null, 2) } };
+    if(cfg.gist){
+      await gistRequest('PATCH', '/gists/'+cfg.gist, { files });
+    } else {
+      const created = await gistRequest('POST', '/gists', { description:'Ship Log data', public:false, files });
+      setSync({ token: cfg.token, gist: created.id });
+    }
+    syncStatus = 'ok';
+    lastPushed = new Date();
+  }catch(e){
+    syncStatus = 'error';
+    console.error('auto push failed', e);
+  }
+  paintStatus();
+}
+
+function statusText(){
+  const cfg = getSync();
+  if(!cfg.token) return { t:'backup off', c:'var(--danger)' };
+  if(syncStatus==='pending')  return { t:'saving…', c:'var(--muted)' };
+  if(syncStatus==='pushing')  return { t:'backing up…', c:'var(--muted)' };
+  if(syncStatus==='error')    return { t:'backup failed', c:'var(--danger)' };
+  if(syncStatus==='ok' && lastPushed) return { t:'backed up '+lastPushed.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), c:'var(--cyan)' };
+  return { t:'backup on', c:'var(--cyan)' };
+}
+
+function paintStatus(){
+  const el = document.getElementById('sync-status');
+  if(!el) return;
+  const s = statusText();
+  el.textContent = s.t;
+  el.style.color = s.c;
+}
+
+function downloadBackup(){
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'ship-log-' + today() + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+function activeProject(){ return state.projects.find(p => p.id === state.activeProject) || null; }
+function currentStep(){ const p = activeProject(); return p && p.queue.length ? p.queue[0] : null; }
+
+function ratio(days){
+  const cutoff = addDays(today(), -days);
+  const recent = state.log.filter(e => e.date >= cutoff);
+  const out = recent.filter(e => e.kind === 'output').length;
+  const inp = recent.filter(e => e.kind === 'input').length;
+  return { out, inp, total: out + inp };
+}
+
+// ---- actions ----
+function setProject(id){ state.activeProject = id; ui.mode='idle'; save(state); render(); }
+
+function startDone(){ ui.mode='marking'; ui.pendingKind=null; ui.nextInput=''; render(); }
+function chooseKind(kind){ ui.pendingKind = kind; ui.mode='nextstep'; render(); setTimeout(()=>{ const el=document.getElementById('next-input'); if(el) el.focus(); },50); }
+
+async function commitDone(nextText){
+  const p = activeProject();
+  const step = currentStep();
+  if(!p || !step) return;
+  state.log.unshift({ id:uid(), date: today(), project:p.name, text: step.text, kind: ui.pendingKind });
+  if(state.log.length > 200) state.log = state.log.slice(0,200);
+  p.queue.shift();
+  const t = (nextText||'').trim();
+  if(t) p.queue.unshift({ id:uid(), text:t });
+  ui.mode='idle'; ui.pendingKind=null; ui.nextInput='';
+  await save(state); render();
+}
+
+function startSplit(){ ui.mode='splitting'; ui.splitInput=['','']; render(); setTimeout(()=>{ const el=document.getElementById('split-a'); if(el) el.focus(); },50); }
+async function commitSplit(a,b){
+  const p = activeProject(); const step = currentStep();
+  if(!p || !step) return;
+  const parts = [a,b].map(x=>(x||'').trim()).filter(Boolean);
+  if(!parts.length){ ui.mode='idle'; render(); return; }
+  p.queue.shift();
+  parts.reverse().forEach(t => p.queue.unshift({ id:uid(), text:t }));
+  ui.mode='idle'; ui.splitInput=['',''];
+  await save(state); render();
+}
+
+async function addQueueItem(pid, text){
+  if(!text.trim()) return;
+  const p = state.projects.find(x=>x.id===pid); if(!p) return;
+  p.queue.push({ id:uid(), text:text.trim() });
+  await save(state); render();
+}
+async function removeQueueItem(pid, qid){
+  const p = state.projects.find(x=>x.id===pid); if(!p) return;
+  p.queue = p.queue.filter(q=>q.id!==qid);
+  await save(state); render();
+}
+async function addProject(name){
+  if(!name.trim()) return;
+  const id = uid();
+  state.projects.push({ id, name:name.trim(), queue:[] });
+  state.activeProject = id;
+  await save(state); render();
+}
+async function removeProject(pid){
+  if(!window.confirm('Remove this project and its queue? Past log entries stay.')) return;
+  state.projects = state.projects.filter(p=>p.id!==pid);
+  if(state.activeProject===pid) state.activeProject = state.projects.length ? state.projects[0].id : null;
+  await save(state); render();
+}
+async function toggleEnv(id){
+  const e = state.env.find(x=>x.id===id); if(!e) return;
+  e.done = !e.done; await save(state); render();
+}
+async function addEnv(text){
+  if(!text.trim()) return;
+  state.env.push({ id:uid(), text:text.trim(), done:false });
+  await save(state); render();
+}
+async function removeEnv(id){ state.env = state.env.filter(e=>e.id!==id); await save(state); render(); }
+function startEditStep(){ ui.mode='editing'; render(); setTimeout(()=>{ const e=document.getElementById('edit-input'); if(e){ e.focus(); e.select(); } },50); }
+async function commitEditStep(text){
+  const p = activeProject(); const step = currentStep();
+  const t = (text||'').trim();
+  if(p && step && t) step.text = t;
+  ui.mode='idle';
+  await save(state); render();
+}
+function startEditQueue(id){ ui.editQ = id; render(); setTimeout(()=>{ const e=document.getElementById('editq-'+id); if(e){ e.focus(); e.select(); } },50); }
+async function commitEditQueue(pid, qid, text){
+  const p = state.projects.find(x=>x.id===pid);
+  const t = (text||'').trim();
+  if(p && t){ const q = p.queue.find(y=>y.id===qid); if(q) q.text = t; }
+  ui.editQ = null;
+  await save(state); render();
+}
+async function promoteQueueItem(pid, qid){
+  const p = state.projects.find(x=>x.id===pid); if(!p) return;
+  const i = p.queue.findIndex(y=>y.id===qid); if(i<=0) return;
+  const [item] = p.queue.splice(i,1);
+  p.queue.unshift(item);
+  await save(state); render();
+}
+
+// ---- GitHub Gist sync ----
+async function gistRequest(method, path, body){
+  const cfg = getSync();
+  const res = await fetch('https://api.github.com'+path, {
+    method,
+    headers: {
+      'Authorization': 'Bearer ' + cfg.token,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!res.ok){
+    const t = await res.text();
+    throw new Error(res.status + ' ' + t.slice(0,120));
+  }
+  return res.json();
+}
+async function saveSyncConfig(token, gist){
+  setSync({ token:(token||'').trim(), gist:(gist||'').trim() });
+  ui.syncMsg = 'Saved on this device.';
+  render();
+}
+async function pushToCloud(){
+  const cfg = getSync();
+  if(!cfg.token){ ui.syncMsg='Add your token first.'; render(); return; }
+  ui.syncing = true; ui.syncMsg='Pushing…'; render();
+  try{
+    const files = { 'ship-log.json': { content: JSON.stringify(state, null, 2) } };
+    if(cfg.gist){
+      await gistRequest('PATCH', '/gists/'+cfg.gist, { files });
+      ui.syncMsg = 'Pushed at ' + new Date().toLocaleTimeString();
+    } else {
+      const created = await gistRequest('POST', '/gists', { description:'Ship Log data', public:false, files });
+      setSync({ token: cfg.token, gist: created.id });
+      ui.syncMsg = 'Created gist ' + created.id + ' — now saved here.';
+    }
+  }catch(e){
+    ui.syncMsg = 'Push failed: ' + e.message;
+  }
+  ui.syncing = false; render();
+}
+async function pullFromCloud(){
+  const cfg = getSync();
+  if(!cfg.token || !cfg.gist){ ui.syncMsg='Need both token and gist ID.'; render(); return; }
+  if(!window.confirm('Replace this device\'s data with the cloud copy?')) return;
+  ui.syncing = true; ui.syncMsg='Pulling…'; render();
+  try{
+    const g = await gistRequest('GET', '/gists/'+cfg.gist);
+    const f = g.files && g.files['ship-log.json'];
+    if(!f) throw new Error('ship-log.json not in that gist');
+    const parsed = JSON.parse(f.content);
+    if(!parsed.projects) throw new Error('file has no project data');
+    state = normalize(parsed);
+    await save(state);
+    ui.syncMsg = 'Pulled at ' + new Date().toLocaleTimeString();
+  }catch(e){
+    ui.syncMsg = 'Pull failed: ' + e.message;
+  }
+  ui.syncing = false; render();
+}
+
+async function markReviewed(){
+  const t = today();
+  state.review.last = t; state.review.next = addDays(t,7);
+  await save(state); render();
+}
+async function copyBackup(){
+  try{ await navigator.clipboard.writeText(JSON.stringify(state)); ui.backupMsg='Copied.'; }
+  catch(e){ ui.backupMsg='Select the text above and copy manually.'; }
+  render();
+}
+async function restoreBackup(text){
+  let p; try{ p = JSON.parse(text); }catch(e){ ui.backupMsg='Not a valid code.'; render(); return; }
+  if(!p.projects || !p.log){ ui.backupMsg='Code is missing data.'; render(); return; }
+  if(!window.confirm('Replace everything with this backup?')) return;
+  state = normalize(p); await save(state); ui.backupMsg='Restored.'; render();
+}
+
+// ---- render ----
+function nowCardHTML(){
+  const p = activeProject();
+  if(!p) return `<div class="now"><div class="empty">Add a project below to begin.</div></div>`;
+  const step = currentStep();
+  const queued = p.queue.length;
+
+  if(!step){
+    return `<div class="now">
+      <div class="eyebrow">Next action — ${esc(p.name)}</div>
+      <div class="step" style="color:var(--muted);font-size:15px;">Queue is empty.</div>
+      <div class="meta">Write the next tiny step and it becomes your one thing.</div>
+      <div class="row-add">
+        <input type="text" id="empty-add" placeholder="Smallest possible next step" />
+        <button class="btn primary sm" data-a="empty-add" data-p="${p.id}">Set</button>
+      </div>
+      <div class="hint">If you can't say it in one short sentence, it's still too big.</div>
+    </div>`;
+  }
+
+  if(ui.mode === 'marking'){
+    return `<div class="now">
+      <div class="eyebrow">Did that make something?</div>
+      <div class="step" style="font-size:15px;margin-bottom:14px;">${esc(step.text)}</div>
+      <div class="choice">
+        <button class="out" data-a="kind" data-kind="output">
+          <span class="k">Output</span>
+          <span class="d">A file, a render, working code, a draft — something that exists now</span>
+        </button>
+        <button class="inp" data-a="kind" data-kind="input">
+          <span class="k">Input</span>
+          <span class="d">Read, watched, researched, set up — nothing produced yet</span>
+        </button>
+      </div>
+      <button class="btn ghost sm" data-a="cancel">Cancel</button>
+      <div class="hint">Answer honestly. The ratio below is the only mirror this tool gives you.</div>
+    </div>`;
+  }
+
+  if(ui.mode === 'nextstep'){
+    return `<div class="now">
+      <div class="eyebrow">One more thing before you close it</div>
+      <p class="field-label">What is the smallest next step for ${esc(p.name)}?</p>
+      <input type="text" id="next-input" placeholder="e.g. Add the date column to the form" />
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn primary" data-a="commit-done">Save &amp; finish</button>
+        <button class="btn ghost" data-a="commit-done-empty">Leave it blank</button>
+      </div>
+      <div class="warn">Writing this now is what removes the friction next time — you'll open this and already know what to do.</div>
+    </div>`;
+  }
+
+  if(ui.mode === 'splitting'){
+    return `<div class="now">
+      <div class="eyebrow">Break it smaller</div>
+      <div class="step" style="font-size:15px;margin-bottom:14px;color:var(--muted);">${esc(step.text)}</div>
+      <p class="field-label">First piece (must be doable in ~15 min)</p>
+      <input type="text" id="split-a" placeholder="First piece" />
+      <p class="field-label" style="margin-top:10px;">Second piece (optional)</p>
+      <input type="text" id="split-b" placeholder="Second piece" />
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn primary" data-a="commit-split">Replace with these</button>
+        <button class="btn ghost" data-a="cancel">Cancel</button>
+      </div>
+      <div class="hint">Splitting is a win, not a retreat. Resistance means the step was too big, not that you're lazy.</div>
+    </div>`;
+  }
+
+  if(ui.mode === 'editing'){
+    return `<div class="now">
+      <div class="eyebrow">Reword this step</div>
+      <input type="text" id="edit-input" value="${esc(step.text)}" />
+      <div class="actions" style="margin-top:12px;">
+        <button class="btn primary" data-a="commit-edit">Save</button>
+        <button class="btn ghost" data-a="cancel">Cancel</button>
+      </div>
+      <div class="hint">Making it smaller or more concrete counts as progress.</div>
+    </div>`;
+  }
+
+  return `<div class="now">
+    <div class="eyebrow">Your one thing — ${esc(p.name)}</div>
+    <div class="step">${esc(step.text)}</div>
+    <div class="meta">${queued > 1 ? (queued-1) + ' more queued after this' : 'last one in the queue'}</div>
+    <div class="actions">
+      <button class="btn primary" data-a="done">✓ Did it</button>
+      <button class="btn" data-a="split">Too big — split</button>
+      <button class="btn ghost" data-a="edit-step">Edit</button>
+    </div>
+    <div class="hint">Don't plan past this. Do this one thing, then decide.</div>
+  </div>`;
+}
+
+function ratioHTML(){
+  const r = ratio(30);
+  if(!r.total) return `<details><summary>Output vs input — last 30 days</summary><div class="empty">Nothing logged yet.</div></details>`;
+  const pctOut = Math.round(r.out / r.total * 100);
+  return `<details open><summary>Output vs input — last 30 days</summary>
+    <div class="bar">
+      <div class="out" style="width:${pctOut}%"></div>
+      <div class="inp" style="width:${100-pctOut}%"></div>
+    </div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--muted);">
+      <b style="color:var(--amber)">${r.out} output</b> · ${r.inp} input · ${pctOut}% shipped
+    </div>
+    ${pctOut < 30 ? `<div class="warn">Mostly input. Not wrong — but if this holds for weeks, the next step you write should produce something, however rough.</div>` : ''}
+  </details>`;
+}
+
+function logHTML(){
+  if(!state.log.length) return `<details><summary>Ship log</summary><div class="empty">Nothing logged yet.</div></details>`;
+  const rows = state.log.slice(0,25).map(e => `
+    <div class="log-row">
+      <span class="tag ${e.kind==='output'?'out':'inp'}">${e.kind==='output'?'OUT':'IN'}</span>
+      <span class="txt">${esc(e.text)}<br><span style="font-size:11px;color:var(--muted)">${esc(e.project)}</span></span>
+      <span class="dt">${esc(e.date.slice(5))}</span>
+    </div>`).join('');
+  return `<details><summary>Ship log — ${state.log.length} logged</summary>${rows}</details>`;
+}
+
+function queueHTML(){
+  const p = activeProject();
+  if(!p) return '';
+  const rows = p.queue.length ? p.queue.map((q,i) => {
+    if(ui.editQ === q.id){
+      return `<div class="queue-row">
+        <input type="text" id="editq-${q.id}" value="${esc(q.text)}" />
+        <button class="btn sm" data-a="commit-editq" data-p="${p.id}" data-id="${q.id}">Save</button>
+        <button class="btn ghost sm" data-a="cancel-editq">✕</button>
+      </div>`;
+    }
+    return `<div class="queue-row">
+      <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:14px;">${i+1}</span>
+      <span class="txt">${esc(q.text)}</span>
+      <button class="remove" data-a="edit-q" data-id="${q.id}" title="Edit">✎</button>
+      ${i>0 ? `<button class="remove" data-a="promote-q" data-p="${p.id}" data-id="${q.id}" title="Move to front">↑</button>` : ''}
+      <button class="remove" data-a="rm-q" data-p="${p.id}" data-id="${q.id}" title="Delete">×</button>
+    </div>`;
+  }).join('') : `<div class="empty">Empty queue.</div>`;
+  return `<details><summary>Queue — ${esc(p.name)}</summary>
+    ${rows}
+    <div class="row-add">
+      <input type="text" id="q-add" placeholder="Add a tiny step to the back of the queue" />
+      <button class="btn sm" data-a="add-q" data-p="${p.id}">Add</button>
+    </div>
+    <div class="hint">Dump steps here whenever you think of them — so you never open this tool facing a blank.</div>
+  </details>`;
+}
+
+function envHTML(){
+  const rows = state.env.length ? state.env.map(e => `
+    <div class="env-row">
+      <input type="checkbox" ${e.done?'checked':''} data-a="tg-env" data-id="${e.id}" />
+      <span class="txt ${e.done?'done':''}">${esc(e.text)}</span>
+      <button class="remove" data-a="rm-env" data-id="${e.id}">×</button>
+    </div>`).join('') : `<div class="empty">Nothing listed.</div>`;
+  const done = state.env.filter(e=>e.done).length;
+  return `<details><summary>Friction removed — ${done}/${state.env.length}</summary>
+    ${rows}
+    <div class="row-add">
+      <input type="text" id="env-add" placeholder="What made it hard to start last time?" />
+      <button class="btn sm" data-a="add-env">Add</button>
+    </div>
+    <div class="hint">One-time fixes, not daily tasks. Add here whenever a step felt harder to begin than to do.</div>
+  </details>`;
+}
+
+function reviewHTML(){
+  const left = daysBetween(today(), state.review.next);
+  const over = left < 0;
+  return `<details><summary>Weekly review — ${over ? Math.abs(left)+' days overdue' : left+' days left'}</summary>
+    <div style="font-size:13px;line-height:1.6;">
+      Three questions, nothing more:<br>
+      1. What did I actually ship this week?<br>
+      2. Which step did I keep avoiding — and how small can I cut it?<br>
+      3. What friction should go on the list above?
+    </div>
+    <button class="btn sm" data-a="reviewed" style="margin-top:10px;">Mark reviewed</button>
+    <div class="hint">${state.review.last ? 'Last: '+esc(state.review.last) : 'Not done yet.'}</div>
+  </details>`;
+}
+
+function syncHTML(){
+  const cfg = getSync();
+  const linked = cfg.token && cfg.gist;
+  return `<details><summary>Cloud sync — ${linked ? 'linked' : 'not set up'}</summary>
+    <p class="field-label">GitHub token (stays on this device only)</p>
+    <input type="text" id="sync-token" value="${esc(cfg.token)}" placeholder="ghp_..." autocomplete="off" />
+    <p class="field-label" style="margin-top:10px;">Gist ID (leave blank the first time)</p>
+    <input type="text" id="sync-gist" value="${esc(cfg.gist)}" placeholder="created automatically on first push" />
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+      <button class="btn sm" data-a="save-sync">Save settings</button>
+      <button class="btn primary sm" data-a="push" ${ui.syncing?'disabled':''}>↑ Push to cloud</button>
+      <button class="btn sm" data-a="pull" ${ui.syncing?'disabled':''}>↓ Pull from cloud</button>
+      <button class="btn ghost sm" data-a="dl">⤓ Download file</button>
+    </div>
+    ${ui.syncMsg ? `<div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-top:8px;word-break:break-all;">${esc(ui.syncMsg)}</div>` : ''}
+    <div class="hint">Once a token is saved, every change backs itself up automatically a couple of seconds later — the manual buttons are only for forcing it or moving data between devices. If this device's storage is ever wiped, opening the tool pulls your data back down on its own.</div>
+    <div class="hint">Every backup creates a revision in the gist, so you can view or restore any earlier version at gist.github.com. Whichever device pushes last wins — there's no merge, so avoid editing on two devices at once.</div>
+  </details>`;
+}
+
+function backupHTML(){
+  return `<details><summary>Backup</summary>
+    <textarea readonly>${esc(JSON.stringify(state))}</textarea>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+      <button class="btn sm" data-a="copy-bk">Copy code</button>
+      ${ui.backupMsg ? `<span style="font-family:var(--mono);font-size:11px;color:var(--cyan);">${esc(ui.backupMsg)}</span>` : ''}
+    </div>
+    <textarea id="bk-in" placeholder="Paste a backup code to restore" style="margin-top:8px;"></textarea>
+    <button class="btn sm" data-a="restore-bk" style="margin-top:6px;">Restore</button>
+  </details>`;
+}
+
+function render(){
+  const r = ratio(30);
+  const pills = state.projects.map(p =>
+    `<button class="pill ${p.id===state.activeProject?'active':''}" data-a="proj" data-id="${p.id}">${esc(p.name)}</button>`
+  ).join('');
+
+  document.getElementById('app').innerHTML = `
+    <div class="topbar">
+      <h1>Ship Log</h1>
+      <div class="ratio">${r.total ? `<b>${r.out}</b> shipped / ${r.total} logged` : 'no entries yet'} · <span id="sync-status" style="color:${statusText().c}">${esc(statusText().t)}</span></div>
+    </div>
+    <div class="pills">
+      ${pills}
+      <button class="pill add" data-a="new-proj">+ project</button>
+    </div>
+    ${nowCardHTML()}
+    ${ratioHTML()}
+    ${queueHTML()}
+    ${logHTML()}
+    ${envHTML()}
+    ${reviewHTML()}
+    ${syncHTML()}
+    ${backupHTML()}
+  `;
+  wire();
+}
+
+function wire(){
+  const app = document.getElementById('app');
+  app.querySelectorAll('[data-a]').forEach(el => {
+    el.addEventListener('click', async () => {
+      const a = el.getAttribute('data-a');
+      if(a==='proj') setProject(el.getAttribute('data-id'));
+      else if(a==='new-proj'){ const n = window.prompt('Project name'); if(n) await addProject(n); }
+      else if(a==='done') startDone();
+      else if(a==='kind') chooseKind(el.getAttribute('data-kind'));
+      else if(a==='cancel'){ ui.mode='idle'; render(); }
+      else if(a==='commit-done'){ const i=document.getElementById('next-input'); await commitDone(i?i.value:''); }
+      else if(a==='commit-done-empty') await commitDone('');
+      else if(a==='split') startSplit();
+      else if(a==='commit-split'){
+        const a1=document.getElementById('split-a'), b1=document.getElementById('split-b');
+        await commitSplit(a1?a1.value:'', b1?b1.value:'');
+      }
+      else if(a==='empty-add'){ const i=document.getElementById('empty-add'); await addQueueItem(el.getAttribute('data-p'), i?i.value:''); }
+      else if(a==='add-q'){ const i=document.getElementById('q-add'); await addQueueItem(el.getAttribute('data-p'), i?i.value:''); }
+      else if(a==='rm-q') await removeQueueItem(el.getAttribute('data-p'), el.getAttribute('data-id'));
+      else if(a==='tg-env') await toggleEnv(el.getAttribute('data-id'));
+      else if(a==='add-env'){ const i=document.getElementById('env-add'); await addEnv(i?i.value:''); }
+      else if(a==='rm-env') await removeEnv(el.getAttribute('data-id'));
+      else if(a==='edit-step') startEditStep();
+      else if(a==='commit-edit'){ const i=document.getElementById('edit-input'); await commitEditStep(i?i.value:''); }
+      else if(a==='edit-q') startEditQueue(el.getAttribute('data-id'));
+      else if(a==='cancel-editq'){ ui.editQ=null; render(); }
+      else if(a==='commit-editq'){
+        const id = el.getAttribute('data-id');
+        const i = document.getElementById('editq-'+id);
+        await commitEditQueue(el.getAttribute('data-p'), id, i?i.value:'');
+      }
+      else if(a==='promote-q') await promoteQueueItem(el.getAttribute('data-p'), el.getAttribute('data-id'));
+      else if(a==='save-sync'){
+        const t=document.getElementById('sync-token'), g=document.getElementById('sync-gist');
+        await saveSyncConfig(t?t.value:'', g?g.value:'');
+      }
+      else if(a==='push') await pushToCloud();
+      else if(a==='pull') await pullFromCloud();
+      else if(a==='dl') downloadBackup();
+      else if(a==='reviewed') await markReviewed();
+      else if(a==='copy-bk') await copyBackup();
+      else if(a==='restore-bk'){ const i=document.getElementById('bk-in'); await restoreBackup(i?i.value:''); }
+    });
+  });
+  const enterMap = {
+    'edit-input': async v => await commitEditStep(v),
+    'next-input': async v => await commitDone(v),
+    'q-add': async v => { const p=activeProject(); if(p) await addQueueItem(p.id, v); },
+    'empty-add': async v => { const p=activeProject(); if(p) await addQueueItem(p.id, v); },
+    'env-add': async v => await addEnv(v)
+  };
+  if(ui.editQ){
+    const p = activeProject();
+    const el = document.getElementById('editq-'+ui.editQ);
+    if(el && p) el.addEventListener('keydown', async e => {
+      if(e.key==='Enter') await commitEditQueue(p.id, ui.editQ, el.value);
+      if(e.key==='Escape'){ ui.editQ=null; render(); }
+    });
+  }
+  Object.keys(enterMap).forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('keydown', async e => { if(e.key==='Enter') await enterMap[id](el.value); });
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden' && syncStatus === 'pending'){
+    if(pushTimer) clearTimeout(pushTimer);
+    autoPush();
+  }
+});
+
+(async function(){ state = await load(); render(); })();
+</script>
+</body>
+</html>
