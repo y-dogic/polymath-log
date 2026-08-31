@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Ship Log</title>
+<title>Polymath Log</title>
 <style>
   :root{
     --bg: #12201d;
@@ -241,7 +241,7 @@ async function autoPush(){
     if(cfg.gist){
       await gistRequest('PATCH', '/gists/'+cfg.gist, { files });
     } else {
-      const created = await gistRequest('POST', '/gists', { description:'Ship Log data', public:false, files });
+      const created = await gistRequest('POST', '/gists', { description:'Polymath Log data', public:false, files });
       setSync({ token: cfg.token, gist: created.id });
     }
     syncStatus = 'ok';
@@ -407,27 +407,27 @@ async function saveSyncConfig(token, gist){
 async function pushToCloud(){
   const cfg = getSync();
   if(!cfg.token){ ui.syncMsg='Add your token first.'; render(); return; }
-  ui.syncing = true; ui.syncMsg='Pushing…'; render();
+  ui.syncing = true; ui.syncMsg='Backing up…'; render();
   try{
     const files = { 'ship-log.json': { content: JSON.stringify(state, null, 2) } };
     if(cfg.gist){
       await gistRequest('PATCH', '/gists/'+cfg.gist, { files });
-      ui.syncMsg = 'Pushed at ' + new Date().toLocaleTimeString();
+      ui.syncMsg = 'Backed up at ' + new Date().toLocaleTimeString();
     } else {
-      const created = await gistRequest('POST', '/gists', { description:'Ship Log data', public:false, files });
+      const created = await gistRequest('POST', '/gists', { description:'Polymath Log data', public:false, files });
       setSync({ token: cfg.token, gist: created.id });
       ui.syncMsg = 'Created gist ' + created.id + ' — now saved here.';
     }
   }catch(e){
-    ui.syncMsg = 'Push failed: ' + e.message;
+    ui.syncMsg = 'Backup failed: ' + e.message;
   }
   ui.syncing = false; render();
 }
 async function pullFromCloud(){
   const cfg = getSync();
-  if(!cfg.token || !cfg.gist){ ui.syncMsg='Need both token and gist ID.'; render(); return; }
-  if(!window.confirm('Replace this device\'s data with the cloud copy?')) return;
-  ui.syncing = true; ui.syncMsg='Pulling…'; render();
+  if(!cfg.token || !cfg.gist){ ui.syncMsg='Fill in both the token and the gist ID first.'; render(); return; }
+  if(!window.confirm('This replaces everything on this device with the cloud copy. Continue?')) return;
+  ui.syncing = true; ui.syncMsg='Fetching…'; render();
   try{
     const g = await gistRequest('GET', '/gists/'+cfg.gist);
     const f = g.files && g.files['ship-log.json'];
@@ -436,9 +436,9 @@ async function pullFromCloud(){
     if(!parsed.projects) throw new Error('file has no project data');
     state = normalize(parsed);
     await save(state);
-    ui.syncMsg = 'Pulled at ' + new Date().toLocaleTimeString();
+    ui.syncMsg = 'Loaded onto this device at ' + new Date().toLocaleTimeString();
   }catch(e){
-    ui.syncMsg = 'Pull failed: ' + e.message;
+    ui.syncMsg = 'Fetch failed: ' + e.message;
   }
   ui.syncing = false; render();
 }
@@ -652,9 +652,13 @@ function syncHTML(){
     <input type="text" id="sync-gist" value="${esc(cfg.gist)}" placeholder="created automatically on first push" />
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
       <button class="btn sm" data-a="save-sync">Save settings</button>
-      <button class="btn primary sm" data-a="push" ${ui.syncing?'disabled':''}>↑ Push to cloud</button>
-      <button class="btn sm" data-a="pull" ${ui.syncing?'disabled':''}>↓ Pull from cloud</button>
-      <button class="btn ghost sm" data-a="dl">⤓ Download file</button>
+      <button class="btn primary sm" data-a="push" ${ui.syncing?'disabled':''}>Back up now</button>
+      <button class="btn sm" data-a="pull" ${ui.syncing?'disabled':''}>Get my data on this device</button>
+      <button class="btn ghost sm" data-a="dl">Save a file copy</button>
+    </div>
+    <div class="hint" style="margin-top:8px;">
+      <b style="color:var(--text)">Back up now</b> — send what's on this device up to the cloud. Happens automatically anyway; this just forces it.<br>
+      <b style="color:var(--text)">Get my data on this device</b> — bring the cloud copy down. Use this on a new phone or after storage was wiped. It replaces what's here.
     </div>
     ${ui.syncMsg ? `<div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-top:8px;word-break:break-all;">${esc(ui.syncMsg)}</div>` : ''}
     <div class="hint">Once a token is saved, every change backs itself up automatically a couple of seconds later — the manual buttons are only for forcing it or moving data between devices. If this device's storage is ever wiped, opening the tool pulls your data back down on its own.</div>
@@ -682,19 +686,19 @@ function render(){
 
   document.getElementById('app').innerHTML = `
     <div class="topbar">
-      <h1>Ship Log</h1>
+      <h1>Polymath Log</h1>
       <div class="ratio">${r.total ? `<b>${r.out}</b> shipped / ${r.total} logged` : 'no entries yet'} · <span id="sync-status" style="color:${statusText().c}">${esc(statusText().t)}</span></div>
     </div>
+    ${ratioHTML()}
     <div class="pills">
       ${pills}
       <button class="pill add" data-a="new-proj">+ project</button>
     </div>
     ${nowCardHTML()}
-    ${ratioHTML()}
     ${queueHTML()}
-    ${logHTML()}
     ${envHTML()}
     ${reviewHTML()}
+    ${logHTML()}
     ${syncHTML()}
     ${backupHTML()}
   `;
