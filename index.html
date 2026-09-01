@@ -120,7 +120,7 @@
 <body>
 <div class="app" id="app"></div>
 <script>
-const APP_VERSION = 'v7 · 2026-09-01';
+const APP_VERSION = 'v8 · 2026-09-01';
 const KEY = 'ship-log-v1';
 const DAY = 86400000;
 
@@ -218,11 +218,22 @@ function normalize(s){
   if(!s.activeProject && s.projects.length) s.activeProject = s.projects[0].id;
   return s;
 }
+const DIAG = [];
+function diag(msg){
+  const line = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}) + '  ' + msg;
+  DIAG.unshift(line);
+  if(DIAG.length > 60) DIAG.pop();
+  console.log('[polymath] ' + line);
+  const el = document.getElementById('diag-box');
+  if(el) el.value = DIAG.join('\n');
+}
+
 let pushTimer = null;
 let syncStatus = 'idle';   // idle | pending | pushing | ok | error
 let lastPushed = null;
 
 async function save(s){
+  s.updatedAt = new Date().toISOString();
   await store.set(JSON.stringify(s));
   scheduleAutoPush();
 }
@@ -236,25 +247,84 @@ function scheduleAutoPush(){
   paintStatus();
 }
 
+async function fetchCloudState(){
+  const cfg = getSync();
+  if(!cfg.token || !cfg.gist) return null;
+  const g = await gistRequest('GET', '/gists/'+cfg.gist);
+  const f = g.files && g.files['ship-log.json'];
+  if(!f) return null;
+  const parsed = JSON.parse(f.content);
+  return parsed && parsed.projects ? parsed : null;
+}
+
+let cloudNewer = false;   // set when the cloud has data this device hasn't seen
+
 async function autoPush(){
   const cfg = getSync();
   if(!cfg.token) return;
   syncStatus = 'pushing'; paintStatus();
   try{
+    // Guard: never overwrite a cloud copy that is newer than this device's.
+    if(cfg.gist){
+      try{
+        const cloud = await fetchCloudState();
+        if(cloud && cloud.updatedAt && state.updatedAt && cloud.updatedAt > state.updatedAt){
+          cloudNewer = true;
+          syncStatus = 'blocked';
+          diag('BLOCKED push — cloud is newer (cloud ' + cloud.updatedAt + ' vs here ' + state.updatedAt + ')');
+          paintStatus(); render();
+          return;
+        }
+      }catch(e){ diag('pre-push check failed: ' + e.message); }
+    }
     const files = { 'ship-log.json': { content: JSON.stringify(state, null, 2) } };
     if(cfg.gist){
       await gistRequest('PATCH', '/gists/'+cfg.gist, { files });
+      diag('pushed ok (' + (state.log||[]).length + ' entries)');
     } else {
       const created = await gistRequest('POST', '/gists', { description:'Polymath Log data', public:false, files });
       setSync({ token: cfg.token, gist: created.id });
+      diag('created gist ' + created.id);
     }
     syncStatus = 'ok';
+    cloudNewer = false;
     lastPushed = new Date();
   }catch(e){
     syncStatus = 'error';
-    console.error('auto push failed', e);
+    diag('push FAILED: ' + e.message);
   }
   paintStatus();
+}
+
+// Check whether the cloud has something this device hasn't seen.
+async function checkForNewer(){
+  const cfg = getSync();
+  if(!cfg.token || !cfg.gist) return;
+  if(syncStatus === 'pending' || syncStatus === 'pushing') return;
+  try{
+    const cloud = await fetchCloudState();
+    if(cloud && cloud.updatedAt && (!state.updatedAt || cloud.updatedAt > state.updatedAt)){
+      cloudNewer = true;
+      diag('cloud has newer data (' + cloud.updatedAt + ')');
+      render();
+    } else {
+      if(cloudNewer){ cloudNewer = false; render(); }
+      diag('checked — this device is up to date');
+    }
+  }catch(e){ diag('check failed: ' + e.message); }
+}
+
+async function loadNewerNow(){
+  try{
+    const cloud = await fetchCloudState();
+    if(!cloud){ diag('nothing to load'); return; }
+    state = normalize(cloud);
+    await store.set(JSON.stringify(state));
+    cloudNewer = false;
+    syncStatus = 'ok'; lastPushed = new Date();
+    diag('loaded newer cloud copy');
+    render();
+  }catch(e){ diag('load failed: ' + e.message); }
 }
 
 function statusText(){
@@ -263,6 +333,7 @@ function statusText(){
   if(syncStatus==='pending')  return { t:'saving…', c:'var(--muted)' };
   if(syncStatus==='pushing')  return { t:'backing up…', c:'var(--muted)' };
   if(syncStatus==='error')    return { t:'backup failed', c:'var(--danger)' };
+  if(syncStatus==='blocked')  return { t:'newer data in cloud', c:'var(--amber)' };
   if(syncStatus==='ok' && lastPushed) return { t:'backed up '+lastPushed.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), c:'var(--cyan)' };
   return { t:'backup on', c:'var(--cyan)' };
 }
@@ -388,8 +459,9 @@ async function promoteQueueItem(pid, qid){
 // ---- GitHub Gist sync ----
 async function gistRequest(method, path, body){
   const cfg = getSync();
-  const res = await fetch('https://api.github.com'+path, {
+  const res = await fetch('https://api.github.com'+path + (method==='GET' ? (path.includes('?')?'&':'?')+'_t='+Date.now() : ''), {
     method,
+    cache: 'no-store',
     headers: {
       'Authorization': 'Bearer ' + cfg.token,
       'Accept': 'application/vnd.github+json',
@@ -705,6 +777,17 @@ function syncHTML(){
   </details>`;
 }
 
+function diagHTML(){
+  return `<details><summary>Diagnostics</summary>
+    <div class="hint" style="margin-top:0;">Newest first. If sync misbehaves, copy this and send it over.</div>
+    <textarea id="diag-box" readonly style="min-height:130px;">${esc(DIAG.join('\n'))}</textarea>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button class="btn sm" data-a="check-now">Check cloud now</button>
+      <button class="btn ghost sm" data-a="copy-diag">Copy log</button>
+    </div>
+  </details>`;
+}
+
 function backupHTML(){
   return `<details><summary>Backup</summary>
     <textarea readonly>${esc(JSON.stringify(state))}</textarea>
@@ -728,6 +811,11 @@ function render(){
       <h1>Polymath Log</h1>
       <div class="ratio">${r.total ? `<b>${r.out}</b> shipped / ${r.total} logged` : 'no entries yet'} · <span id="sync-status" style="color:${statusText().c}">${esc(statusText().t)}</span></div>
     </div>
+    ${cloudNewer ? `<div style="background:rgba(229,164,69,0.14);border:1px solid var(--amber);border-radius:9px;padding:12px 14px;margin-bottom:14px;">
+      <div style="font-size:13px;line-height:1.5;margin-bottom:10px;">Your other device has newer data. This device hasn't been updated yet — backing up from here is paused so it can't overwrite it.</div>
+      <button class="btn primary sm" data-a="load-newer">Load the newer version</button>
+      <button class="btn ghost sm" data-a="keep-mine">Keep this device's version instead</button>
+    </div>` : ''}
     ${ratioHTML()}
     <div class="pills">
       ${pills}
@@ -739,6 +827,7 @@ function render(){
     ${reviewHTML()}
     ${logHTML()}
     ${syncHTML()}
+    ${diagHTML()}
     ${backupHTML()}
     <div style="text-align:center;font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:14px;letter-spacing:0.08em;">${esc(APP_VERSION)}</div>
   `;
@@ -787,6 +876,14 @@ function wire(){
         await saveSyncConfig(t?t.value:'', g?g.value:'');
         await testConnection();
       }
+      else if(a==='load-newer') await loadNewerNow();
+      else if(a==='keep-mine'){ cloudNewer=false; syncStatus='idle'; diag('user chose to keep this device version'); scheduleAutoPush(); render(); }
+      else if(a==='check-now') await checkForNewer();
+      else if(a==='copy-diag'){
+        try{ await navigator.clipboard.writeText(DIAG.join('\n')); ui.syncMsg='Log copied.'; }
+        catch(e){ ui.syncMsg='Select the log text and copy manually.'; }
+        render();
+      }
       else if(a==='push') await pushToCloud();
       else if(a==='pull') await pullFromCloud();
       else if(a==='dl') downloadBackup();
@@ -821,9 +918,20 @@ document.addEventListener('visibilitychange', () => {
     if(pushTimer) clearTimeout(pushTimer);
     autoPush();
   }
+  if(document.visibilityState === 'visible'){
+    diag('tab focused — checking cloud');
+    checkForNewer();
+  }
 });
+window.addEventListener('focus', () => { checkForNewer(); });
 
-(async function(){ state = await load(); render(); })();
+(async function(){
+  state = await load();
+  render();
+  diag('opened ' + APP_VERSION);
+  checkForNewer();
+  setInterval(checkForNewer, 60000);
+})();
 </script>
 </body>
 </html>
