@@ -114,13 +114,32 @@
   .bar{ height:6px; border-radius:3px; background:var(--line); overflow:hidden; display:flex; margin:8px 0 4px; }
   .bar .out{ background:var(--amber); }
   .bar .inp{ background:var(--cyan-dim); }
+  .rv-badge{
+    font-family:var(--mono); font-size:9px; letter-spacing:0.1em; padding:2px 6px;
+    border-radius:3px; background:var(--line); color:var(--muted); margin-left:6px;
+  }
+  .rv-badge.soon{ background:rgba(229,164,69,0.2); color:var(--amber); }
+  .rv-badge.due{ background:var(--danger); color:#1a0d08; font-weight:700; }
+  details.review.due{
+    border-color: var(--danger);
+    background: linear-gradient(rgba(217,119,87,0.10), rgba(217,119,87,0.10)), var(--panel);
+    animation: nudge 2.4s ease-in-out infinite;
+  }
+  details.review.soon{ border-color: var(--amber); }
+  @keyframes nudge{
+    0%,100%{ box-shadow: 0 0 0 0 rgba(217,119,87,0.0); }
+    50%{ box-shadow: 0 0 0 4px rgba(217,119,87,0.18); }
+  }
+  @media (prefers-reduced-motion: reduce){ details.review.due{ animation:none; } }
+  .rv-call{ font-size:12px; color:var(--danger); font-weight:600; line-height:1.5; }
+  .pill .dot{ display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--danger); margin-left:5px; vertical-align:middle; }
   textarea{ width:100%; background:var(--bg); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:8px; font-family:var(--mono); font-size:10px; min-height:56px; resize:vertical; }
 </style>
 </head>
 <body>
 <div class="app" id="app"></div>
 <script>
-const APP_VERSION = 'v8 · 2026-09-01';
+const APP_VERSION = 'v9 · 2026-09-01';
 const KEY = 'ship-log-v1';
 const DAY = 86400000;
 
@@ -131,6 +150,15 @@ function uid(){ return Math.random().toString(36).slice(2,9); }
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
 
 let state = null;
+const openSections = new Set();
+function keepOpen(id){ openSections.add(id); }
+function isOpen(id){ return openSections.has(id) ? 'open' : ''; }
+function refocus(id){
+  setTimeout(()=>{
+    const el = document.getElementById(id);
+    if(el){ el.focus(); if(el.scrollIntoView) el.scrollIntoView({block:'center', behavior:'smooth'}); }
+  }, 30);
+}
 let ui = { mode:'idle', splitInput:['',''], nextInput:'', pendingKind:null, backupMsg:'', editQ:null, syncMsg:'', syncing:false };
 
 const SYNC_KEY = 'ship-log-sync';
@@ -146,15 +174,16 @@ function defaultState(){
   return {
     activeProject: null,
     projects: [
-      { id:'p1', name:'Workload App', queue:[{ id:uid(), text:'Write down the 3 fields the app must track — nothing else' }] },
-      { id:'p2', name:'ComfyUI / AI Video', queue:[{ id:uid(), text:'Open ComfyUI and run one default workflow end to end' }] }
+      { id:'p1', name:'Workload App',
+        queue:[{ id:uid(), text:'Write down the 3 fields the app must track — nothing else' }],
+        env:[{ id:uid(), text:'App project folder is pinned / one click away', done:false }],
+        review:{ last:null, next: addDays(today(), 7) } },
+      { id:'p2', name:'ComfyUI / AI Video',
+        queue:[{ id:uid(), text:'Open ComfyUI and run one default workflow end to end' }],
+        env:[{ id:uid(), text:'ComfyUI opens with one workflow already loaded', done:false }],
+        review:{ last:null, next: addDays(today(), 7) } }
     ],
-    log: [],
-    env: [
-      { id:uid(), text:'ComfyUI opens with one workflow already loaded', done:false },
-      { id:uid(), text:'App project folder is pinned / one click away', done:false }
-    ],
-    review: { last:null, next: addDays(today(), 7) }
+    log: []
   };
 }
 
@@ -211,10 +240,28 @@ async function load(){
 }
 function normalize(s){
   s.projects = s.projects || [];
-  s.projects.forEach(p => { p.queue = p.queue || []; });
   s.log = s.log || [];
-  s.env = s.env || [];
-  s.review = s.review || { last:null, next: addDays(today(),7) };
+
+  // Migration: env and review used to be global. Move them onto projects.
+  const legacyEnv = Array.isArray(s.env) ? s.env : null;
+  const legacyReview = s.review && s.review.next ? s.review : null;
+
+  s.projects.forEach((p, i) => {
+    p.queue = p.queue || [];
+    if(!Array.isArray(p.env)){
+      // give the old shared friction list to the first project only, so it isn't duplicated
+      p.env = (legacyEnv && i === 0) ? legacyEnv : [];
+    }
+    if(!p.review || !p.review.next){
+      p.review = legacyReview
+        ? { last: legacyReview.last, next: legacyReview.next }
+        : { last:null, next: addDays(today(), 7) };
+    }
+  });
+
+  delete s.env;
+  delete s.review;
+
   if(!s.activeProject && s.projects.length) s.activeProject = s.projects[0].id;
   return s;
 }
@@ -386,14 +433,22 @@ async function commitDone(nextText){
   await save(state); render();
 }
 
-function startSplit(){ ui.mode='splitting'; ui.splitInput=['','']; render(); setTimeout(()=>{ const el=document.getElementById('split-a'); if(el) el.focus(); },50); }
-async function commitSplit(a,b){
+function readSplitFields(){
+  const vals = [];
+  document.querySelectorAll('.split-f').forEach(el => vals.push(el.value));
+  if(vals.length) ui.splitInput = vals;
+}
+function startSplit(){ ui.mode='splitting'; ui.splitInput=['','']; render(); refocus('split-0'); }
+function addSplitField(){ readSplitFields(); ui.splitInput.push(''); render(); refocus('split-'+(ui.splitInput.length-1)); }
+function removeSplitField(i){ readSplitFields(); ui.splitInput.splice(i,1); if(!ui.splitInput.length) ui.splitInput=['']; render(); }
+async function commitSplit(){
+  readSplitFields();
   const p = activeProject(); const step = currentStep();
   if(!p || !step) return;
-  const parts = [a,b].map(x=>(x||'').trim()).filter(Boolean);
+  const parts = ui.splitInput.map(x=>(x||'').trim()).filter(Boolean);
   if(!parts.length){ ui.mode='idle'; render(); return; }
   p.queue.shift();
-  parts.reverse().forEach(t => p.queue.unshift({ id:uid(), text:t }));
+  parts.slice().reverse().forEach(t => p.queue.unshift({ id:uid(), text:t }));
   ui.mode='idle'; ui.splitInput=['',''];
   await save(state); render();
 }
@@ -402,17 +457,19 @@ async function addQueueItem(pid, text){
   if(!text.trim()) return;
   const p = state.projects.find(x=>x.id===pid); if(!p) return;
   p.queue.push({ id:uid(), text:text.trim() });
-  await save(state); render();
+  keepOpen('queue');
+  await save(state); render(); refocus('q-add');
 }
 async function removeQueueItem(pid, qid){
   const p = state.projects.find(x=>x.id===pid); if(!p) return;
   p.queue = p.queue.filter(q=>q.id!==qid);
+  keepOpen('queue');
   await save(state); render();
 }
 async function addProject(name){
   if(!name.trim()) return;
   const id = uid();
-  state.projects.push({ id, name:name.trim(), queue:[] });
+  state.projects.push({ id, name:name.trim(), queue:[], env:[], review:{ last:null, next: addDays(today(), 7) } });
   state.activeProject = id;
   await save(state); render();
 }
@@ -423,15 +480,23 @@ async function removeProject(pid){
   await save(state); render();
 }
 async function toggleEnv(id){
-  const e = state.env.find(x=>x.id===id); if(!e) return;
+  const p = activeProject(); if(!p) return;
+  const e = p.env.find(x=>x.id===id); if(!e) return;
   e.done = !e.done; await save(state); render();
 }
 async function addEnv(text){
   if(!text.trim()) return;
-  state.env.push({ id:uid(), text:text.trim(), done:false });
+  const p = activeProject(); if(!p) return;
+  p.env.push({ id:uid(), text:text.trim(), done:false });
+  keepOpen('env');
+  await save(state); render(); refocus('env-add');
+}
+async function removeEnv(id){
+  const p = activeProject(); if(!p) return;
+  p.env = p.env.filter(e=>e.id!==id);
+  keepOpen('env');
   await save(state); render();
 }
-async function removeEnv(id){ state.env = state.env.filter(e=>e.id!==id); await save(state); render(); }
 function startEditStep(){ ui.mode='editing'; render(); setTimeout(()=>{ const e=document.getElementById('edit-input'); if(e){ e.focus(); e.select(); } },50); }
 async function commitEditStep(text){
   const p = activeProject(); const step = currentStep();
@@ -554,8 +619,10 @@ async function pullFromCloud(){
 }
 
 async function markReviewed(){
+  const p = activeProject(); if(!p) return;
   const t = today();
-  state.review.last = t; state.review.next = addDays(t,7);
+  p.review.last = t; p.review.next = addDays(t,7);
+  keepOpen('review');
   await save(state); render();
 }
 async function copyBackup(){
@@ -623,18 +690,22 @@ function nowCardHTML(){
   }
 
   if(ui.mode === 'splitting'){
+    const fields = ui.splitInput.map((v,i) => `
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:14px;">${i+1}</span>
+        <input type="text" class="split-f" id="split-${i}" value="${esc(v)}" placeholder="${i===0?'First piece — doable in ~15 min':'Another piece (optional)'}" />
+        ${ui.splitInput.length > 1 ? `<button class="remove" data-a="split-rm" data-i="${i}" title="Remove">×</button>` : ''}
+      </div>`).join('');
     return `<div class="now">
       <div class="eyebrow">Break it smaller</div>
       <div class="step" style="font-size:15px;margin-bottom:14px;color:var(--muted);">${esc(step.text)}</div>
-      <p class="field-label">First piece (must be doable in ~15 min)</p>
-      <input type="text" id="split-a" placeholder="First piece" />
-      <p class="field-label" style="margin-top:10px;">Second piece (optional)</p>
-      <input type="text" id="split-b" placeholder="Second piece" />
+      ${fields}
+      <button class="btn ghost sm" data-a="split-add">+ another piece</button>
       <div class="actions" style="margin-top:12px;">
         <button class="btn primary" data-a="commit-split">Replace with these</button>
         <button class="btn ghost" data-a="cancel">Cancel</button>
       </div>
-      <div class="hint">Splitting is a win, not a retreat. Resistance means the step was too big, not that you're lazy.</div>
+      <div class="hint">They go into the queue in this order — the first becomes your one thing. Splitting is a win, not a retreat.</div>
     </div>`;
   }
 
@@ -665,9 +736,9 @@ function nowCardHTML(){
 
 function ratioHTML(){
   const r = ratio(30);
-  if(!r.total) return `<details><summary>Output vs input — last 30 days</summary><div class="empty">Nothing logged yet.</div></details>`;
+  if(!r.total) return `<details data-sec="ratio" ${isOpen('ratio')}><summary>Output vs input — last 30 days</summary><div class="empty">Nothing logged yet.</div></details>`;
   const pctOut = Math.round(r.out / r.total * 100);
-  return `<details open><summary>Output vs input — last 30 days</summary>
+  return `<details data-sec="ratio" open><summary>Output vs input — last 30 days</summary>
     <div class="bar">
       <div class="out" style="width:${pctOut}%"></div>
       <div class="inp" style="width:${100-pctOut}%"></div>
@@ -680,14 +751,14 @@ function ratioHTML(){
 }
 
 function logHTML(){
-  if(!state.log.length) return `<details><summary>Ship log</summary><div class="empty">Nothing logged yet.</div></details>`;
+  if(!state.log.length) return `<details data-sec="log" ${isOpen('log')}><summary>Ship log</summary><div class="empty">Nothing logged yet.</div></details>`;
   const rows = state.log.slice(0,25).map(e => `
     <div class="log-row">
       <span class="tag ${e.kind==='output'?'out':'inp'}">${e.kind==='output'?'OUT':'IN'}</span>
       <span class="txt">${esc(e.text)}<br><span style="font-size:11px;color:var(--muted)">${esc(e.project)}</span></span>
       <span class="dt">${esc(e.date.slice(5))}</span>
     </div>`).join('');
-  return `<details><summary>Ship log — ${state.log.length} logged</summary>${rows}</details>`;
+  return `<details data-sec="log" ${isOpen('log')}><summary>Ship log — ${state.log.length} logged</summary>${rows}</details>`;
 }
 
 function queueHTML(){
@@ -709,7 +780,7 @@ function queueHTML(){
       <button class="remove" data-a="rm-q" data-p="${p.id}" data-id="${q.id}" title="Delete">×</button>
     </div>`;
   }).join('') : `<div class="empty">Empty queue.</div>`;
-  return `<details><summary>Queue — ${esc(p.name)}</summary>
+  return `<details data-sec="queue" ${isOpen('queue')}><summary>Queue — ${esc(p.name)}</summary>
     ${rows}
     <div class="row-add">
       <input type="text" id="q-add" placeholder="Add a tiny step to the back of the queue" />
@@ -720,42 +791,57 @@ function queueHTML(){
 }
 
 function envHTML(){
-  const rows = state.env.length ? state.env.map(e => `
+  const p = activeProject();
+  if(!p) return '';
+  const rows = p.env.length ? p.env.map(e => `
     <div class="env-row">
       <input type="checkbox" ${e.done?'checked':''} data-a="tg-env" data-id="${e.id}" />
       <span class="txt ${e.done?'done':''}">${esc(e.text)}</span>
       <button class="remove" data-a="rm-env" data-id="${e.id}">×</button>
-    </div>`).join('') : `<div class="empty">Nothing listed.</div>`;
-  const done = state.env.filter(e=>e.done).length;
-  return `<details><summary>Friction removed — ${done}/${state.env.length}</summary>
+    </div>`).join('') : `<div class="empty">Nothing listed for this project yet.</div>`;
+  const done = p.env.filter(e=>e.done).length;
+  return `<details data-sec="env" ${isOpen('env')}><summary>Friction — ${esc(p.name)} — ${done}/${p.env.length}</summary>
     ${rows}
     <div class="row-add">
-      <input type="text" id="env-add" placeholder="What made it hard to start last time?" />
+      <input type="text" id="env-add" placeholder="What made it hard to start this project?" />
       <button class="btn sm" data-a="add-env">Add</button>
     </div>
-    <div class="hint">One-time fixes, not daily tasks. Add here whenever a step felt harder to begin than to do.</div>
+    <div class="hint">This list belongs to ${esc(p.name)} only. One-time fixes, not daily tasks — add whenever starting cost more effort than doing.</div>
   </details>`;
 }
 
+function reviewState(p){
+  const left = daysBetween(today(), p.review.next);
+  if(left < 0)  return { level:'over',  left, label:Math.abs(left)+(Math.abs(left)===1?' DAY OVERDUE':' DAYS OVERDUE') };
+  if(left === 0) return { level:'due',   left, label:'DUE TODAY' };
+  if(left <= 2)  return { level:'soon',  left, label:left+(left===1?' day left':' days left') };
+  return          { level:'ok',    left, label:left+' days left' };
+}
+
 function reviewHTML(){
-  const left = daysBetween(today(), state.review.next);
-  const over = left < 0;
-  return `<details><summary>Weekly review — ${over ? Math.abs(left)+' days overdue' : left+' days left'}</summary>
+  const p = activeProject();
+  if(!p) return '';
+  const rs = reviewState(p);
+  const urgent = rs.level==='due' || rs.level==='over';
+  const cls = urgent ? 'due' : (rs.level==='soon' ? 'soon' : '');
+  return `<details data-sec="review" class="review ${cls}" ${urgent ? 'open' : isOpen('review')}>
+    <summary>Weekly review — ${esc(p.name)} <span class="rv-badge ${cls}">${esc(rs.label)}</span></summary>
+    ${urgent ? `<div class="rv-call">Review is ${rs.level==='due'?'due today':'overdue'} for ${esc(p.name)}. It stays highlighted until you mark it done.</div>` : ''}
     <div style="font-size:13px;line-height:1.6;">
       Three questions, nothing more:<br>
-      1. What did I actually ship this week?<br>
+      1. What did I actually ship for ${esc(p.name)} this week?<br>
       2. Which step did I keep avoiding — and how small can I cut it?<br>
-      3. What friction should go on the list above?
+      3. What friction should go on this project's list?
     </div>
-    <button class="btn sm" data-a="reviewed" style="margin-top:10px;">Mark reviewed</button>
-    <div class="hint">${state.review.last ? 'Last: '+esc(state.review.last) : 'Not done yet.'}</div>
+    <button class="btn ${urgent?'primary':''} sm" data-a="reviewed" style="margin-top:10px;">Mark reviewed</button>
+    <div class="hint">${p.review.last ? 'Last reviewed: '+esc(p.review.last) : 'Never reviewed.'} Each project has its own cadence.</div>
   </details>`;
 }
 
 function syncHTML(){
   const cfg = getSync();
   const linked = cfg.token && cfg.gist;
-  return `<details><summary>Cloud sync — ${linked ? 'linked' : 'not set up'}</summary>
+  return `<details data-sec="sync" ${isOpen('sync')}><summary>Cloud sync — ${linked ? 'linked' : 'not set up'}</summary>
     <p class="field-label">GitHub token (stays on this device only)</p>
     <input type="text" id="sync-token" value="${esc(cfg.token)}" placeholder="ghp_..." autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
     <p class="field-label" style="margin-top:10px;">Gist ID (leave blank the first time)</p>
@@ -778,7 +864,7 @@ function syncHTML(){
 }
 
 function diagHTML(){
-  return `<details><summary>Diagnostics</summary>
+  return `<details data-sec="diag" ${isOpen('diag')}><summary>Diagnostics</summary>
     <div class="hint" style="margin-top:0;">Newest first. If sync misbehaves, copy this and send it over.</div>
     <textarea id="diag-box" readonly style="min-height:130px;">${esc(DIAG.join('\n'))}</textarea>
     <div style="display:flex;gap:8px;margin-top:6px;">
@@ -789,7 +875,7 @@ function diagHTML(){
 }
 
 function backupHTML(){
-  return `<details><summary>Backup</summary>
+  return `<details data-sec="backup" ${isOpen('backup')}><summary>Backup</summary>
     <textarea readonly>${esc(JSON.stringify(state))}</textarea>
     <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
       <button class="btn sm" data-a="copy-bk">Copy code</button>
@@ -802,9 +888,11 @@ function backupHTML(){
 
 function render(){
   const r = ratio(30);
-  const pills = state.projects.map(p =>
-    `<button class="pill ${p.id===state.activeProject?'active':''}" data-a="proj" data-id="${p.id}">${esc(p.name)}</button>`
-  ).join('');
+  const pills = state.projects.map(p => {
+    const rs = reviewState(p);
+    const flag = (rs.level==='due' || rs.level==='over') ? '<span class="dot"></span>' : '';
+    return `<button class="pill ${p.id===state.activeProject?'active':''}" data-a="proj" data-id="${p.id}">${esc(p.name)}${flag}</button>`;
+  }).join('');
 
   document.getElementById('app').innerHTML = `
     <div class="topbar">
@@ -847,10 +935,9 @@ function wire(){
       else if(a==='commit-done'){ const i=document.getElementById('next-input'); await commitDone(i?i.value:''); }
       else if(a==='commit-done-empty') await commitDone('');
       else if(a==='split') startSplit();
-      else if(a==='commit-split'){
-        const a1=document.getElementById('split-a'), b1=document.getElementById('split-b');
-        await commitSplit(a1?a1.value:'', b1?b1.value:'');
-      }
+      else if(a==='commit-split') await commitSplit();
+      else if(a==='split-add') addSplitField();
+      else if(a==='split-rm') removeSplitField(parseInt(el.getAttribute('data-i'),10));
       else if(a==='empty-add'){ const i=document.getElementById('empty-add'); await addQueueItem(el.getAttribute('data-p'), i?i.value:''); }
       else if(a==='add-q'){ const i=document.getElementById('q-add'); await addQueueItem(el.getAttribute('data-p'), i?i.value:''); }
       else if(a==='rm-q') await removeQueueItem(el.getAttribute('data-p'), el.getAttribute('data-id'));
@@ -892,6 +979,12 @@ function wire(){
       else if(a==='restore-bk'){ const i=document.getElementById('bk-in'); await restoreBackup(i?i.value:''); }
     });
   });
+  app.querySelectorAll('details[data-sec]').forEach(d => {
+    d.addEventListener('toggle', () => {
+      const k = d.getAttribute('data-sec');
+      if(d.open) openSections.add(k); else openSections.delete(k);
+    });
+  });
   const enterMap = {
     'edit-input': async v => await commitEditStep(v),
     'next-input': async v => await commitDone(v),
@@ -905,6 +998,17 @@ function wire(){
     if(el && p) el.addEventListener('keydown', async e => {
       if(e.key==='Enter') await commitEditQueue(p.id, ui.editQ, el.value);
       if(e.key==='Escape'){ ui.editQ=null; render(); }
+    });
+  }
+  if(ui.mode === 'splitting'){
+    document.querySelectorAll('.split-f').forEach((el, i) => {
+      el.addEventListener('keydown', async e => {
+        if(e.key === 'Enter'){
+          e.preventDefault();
+          if(i === ui.splitInput.length - 1) addSplitField();
+          else refocus('split-'+(i+1));
+        }
+      });
     });
   }
   Object.keys(enterMap).forEach(id => {
